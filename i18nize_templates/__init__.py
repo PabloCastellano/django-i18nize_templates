@@ -1018,6 +1018,8 @@ class HandlebarsHtmlLexer(HtmlLexer):
         tags = (('{{!', '}}', True),
                 # We never try to i18nize already-marked-up text.
                 ('{{#_}}', '{{/_}}', True),
+                ('{{_', '}}', True),
+
                 ('{{#ngettext', '{{/ngettext}}', True),
                 ('{{#i18nDoNotTranslate', '{{/i18nDoNotTranslate}}', True),
                 # TODO(csilvers): how to i18n-ize function args?  Not
@@ -1604,7 +1606,8 @@ class Jinja2TextHandler(NullTextHandler):
                 retval[i] = retval[i].replace('%', '%%')
 
         arglist = [', %s=%s' % var_and_val for var_and_val in vars.iteritems()]
-        return '{{ _("%s"%s) }}' % (''.join(retval), ''.join(arglist))
+        # return '{{ _("%s"%s) }}' % (''.join(retval), ''.join(arglist))
+        return '{%s trans "%s"%s %s}' % ('%', ''.join(retval), ''.join(arglist), '%')
 
 
 class HandlebarsTextHandler(NullTextHandler):
@@ -1628,7 +1631,7 @@ class HandlebarsTextHandler(NullTextHandler):
         """Add {{#_}}...{{/_}} around s."""
         if not segments:
             return ''     # no need to add an underscore to the empty string!
-        return '{{#_}}%s{{/_}}' % ''.join(segments)
+        return '{{_ "%s" }}' % ''.join(segments)
 
 
 def i18nize(html_file, parser):
