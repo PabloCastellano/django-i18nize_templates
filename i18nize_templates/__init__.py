@@ -1019,6 +1019,7 @@ class HandlebarsHtmlLexer(HtmlLexer):
                 # We never try to i18nize already-marked-up text.
                 ('{{#_}}', '{{/_}}', True),
                 ('{{_', '}}', True),
+                ('{{', '}}', True),
 
                 ('{{#ngettext', '{{/ngettext}}', True),
                 ('{{#i18nDoNotTranslate', '{{/i18nDoNotTranslate}}', True),
@@ -1029,8 +1030,9 @@ class HandlebarsHtmlLexer(HtmlLexer):
                 ('{{/', '}}', True),
                 ('{{>', '}}', True),
                 # This must come before '{{', so it matches first.
-                ('{{{', '}}}', False),
-                ('{{', '}}', False))
+                ('{{{', '}}}', False)
+                # ('{{', '}}', False))
+                )
 
         rawdata = self.rawdata
         for (starttag, endtag, segment_separates_nltext) in tags:
