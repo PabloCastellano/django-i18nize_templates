@@ -762,7 +762,7 @@ class HtmlLexer(markupbase.ParserBase):
         self.clear_cdata_mode()
         return (match.end(), tag)
 
-    def parse_entity(self, i):
+    def     parse_entity(self, i):
         """Parse the 'interesting' entity at self.rawdata[i].
 
         This is called for every place in self.rawdata that matches
@@ -935,13 +935,16 @@ class Jinja2HtmlLexer(HtmlLexer):
         # 3rd value here is true for tags that break up natural language runs.
         tags = (('{#', '#}', True),
                 ('{%', '%}', True),
+                ('{{', '}}', True),
+
                 # We never try to merge already-marked-up i18n
                 # text with its neighbors.
                 ('{{ _(', '}}', True),
                 ('{{ _TODO(', '}}', True),
                 ('{{ i18n_do_not_translate(', '}}', True),
                 ('{{ ngettext(', '}}', True),
-                ('{{', '}}', False))
+                # ('{{', '}}', False)
+        )
 
         rawdata = self.rawdata
         for (starttag, endtag, segment_separates_nltext) in tags:
@@ -1365,8 +1368,10 @@ class NullTextHandler(object):
             if segment.startswith('<'):
                 segment = self.handle_tag(segment)
             retval += segment
+            print "retval", retval, "/retval"
         else:
             self.nltext_segments.append(segment)
+            print "segment", segment, "segment"
 
         return retval
 
@@ -1612,6 +1617,185 @@ class Jinja2TextHandler(NullTextHandler):
         return '{%s trans "%s"%s %s}' % ('%', ''.join(retval), ''.join(arglist), '%')
 
 
+class DjangoTextHandler(NullTextHandler):
+    J2_VAR = re.compile(r'{{((?:}[^}]|[^}])*)}}')
+    J2_FUNCTION_ARG = re.compile(r'"([^"]|\\.)*"|'
+                                 r"'([^']|\\.)*'")
+
+    def is_entity(self, segment):
+        """Return true if segment is an <html tag>, not a string of text."""
+        return (super(DjangoTextHandler, self).is_entity(segment) or
+                segment.startswith('{{'))
+
+    def no_natural_language_or_already_translated(self, segment):
+        html_handler = super(DjangoTextHandler, self)
+        if (html_handler.is_entity(segment) or
+                html_handler.NO_NATURAL_LANGUAGE.match(segment)):
+            return True
+
+        m = self.J2_VAR.match(segment)
+        if not m:
+            return False
+
+        var = m.group(1).strip()
+        if var.startswith(('_(', 'ngettext(', 'i18n_do_not_translate(')):
+            return True
+
+        return False
+
+    def _add_underscore_in_one_fn(self, s, i):
+        assert s[i] == '(', (s, i)
+        already_translated = _OK_FUNCTIONS_RE.search(s[:i])
+        retval = '('
+        i += 1
+        while i < len(s):
+            if s[i] in ('"', "'"):
+                m = self.J2_FUNCTION_ARG.match(s[i:])
+                if (already_translated or
+                        _OK_FUNCTION_PARAMS_RE.search(s[:i]) or
+                        _OK_FUNCTION_ARGUMENTS_RE.match(m.group())):
+                    retval += s[i:(i + m.end())]
+                else:
+                    retval += '_TODO(%s)' % s[i:(i + m.end())]
+                i += m.end()
+            elif s[i] == '(':
+                (new_text, i) = self._add_underscore_in_one_fn(s, i)
+                retval += new_text
+            elif s[i] == ')':
+                retval += s[i]
+                i += 1
+                return (''.join(retval), i)
+            else:
+                retval += s[i]
+                i += 1
+        return retval
+
+    def _add_underscore_in_var(self, s):
+        retval = ''
+        i = 0
+        while i < len(s):
+            m = self.J2_FUNCTION_ARG.match(s[i:])
+            if m:
+                if (s.endswith('[', 0, i) or
+                        _OK_FUNCTION_ARGUMENTS_RE.match(m.group())):
+                    retval += m.group()
+                else:
+                    retval += '_(%s)' % m.group()
+                i += m.end()
+            elif s[i] == '(':
+                (new_text, i) = self._add_underscore_in_one_fn(s, i)
+                retval += new_text
+            else:
+                retval += s[i]
+                i += 1
+        return retval
+
+    def add_underscore(self, segments):
+        if not segments:
+            return ''     # no need to add an underscore to the empty string!
+
+        retval = []
+        for segment in segments:
+            if (not self.is_entity(segment) and
+                   not self.NO_NATURAL_LANGUAGE.match(segment)):
+                # Oops, we have 'normal' nltext, can't use the shortcut
+                break
+        else:      # for/else: if we get here we *can* use the shortcut!
+            for segment in segments:
+                m = self.J2_VAR.match(segment)
+                if m:
+                    retval.append('{{%s}}'
+                                  % self._add_underscore_in_var(m.group(1)))
+                else:
+                    retval.append(segment)
+            return ''.join(retval)
+
+        new_segments = []
+        for segment in segments:
+            last_copy = 0
+            for m in self.J2_VAR.finditer(segment):
+                new_segments.append(segment[last_copy:m.start()])
+                new_segments.append(segment[m.start():m.end()])
+                last_copy = m.end()
+            new_segments.append(segment[last_copy:])
+
+        vars = {}   # map from python-name to jinja2 value
+        maybe_escape_percents_index = []
+        for segment in new_segments:
+            m = self.J2_VAR.search(segment)
+            if m:
+                var = m.group(1).strip()   # include any filters or fn args
+                # Get the name of the variable or function (sans fn args).
+                varname = re.split('[|(]', var, 1)[0]   # |==filter (==fn args
+                # Normalize varname so it's a legal python variable name.
+                varname = re.sub('\W', '_', varname.strip())
+
+                new_var = self._add_underscore_in_var(var)
+
+                vars.setdefault(varname, new_var)
+                if vars[varname] != new_var:
+                    return '_TODO(%s)' % ''.join(segments)
+
+                # Replace this var with a python var: {{days}} -> %(days)s
+                retval.append('%%(%s)s' % varname)
+            else:
+                retval.append(segment.replace('"', '\\"'))
+                maybe_escape_percents_index.append(len(retval) - 1)
+
+        if vars:
+            for i in maybe_escape_percents_index:
+                retval[i] = retval[i].replace('%', '%%')
+
+        arglist = [', %s=%s' % var_and_val for var_and_val in vars.iteritems()]
+        return '{%s trans "%s"%s %s}' % ('%', ''.join(retval), ''.join(arglist), '%')
+
+
+class DjangoHtmlLexer(HtmlLexer):
+    INTERESTING_NORMAL = re.compile('<|{{|{#|{%')
+    INTERESTING_CDATA = lambda cls, tag: re.compile(r'</\s*%s' % tag, re.I)
+    _DJ_VAR = r'{{(?:}?[^}])*}}'
+    _DJ_BALANCED_BLOCK = r'{%-?\s*(?!end).*?{%-?\s*end[^%]*%}'
+    TAGFIND = re.compile('[a-zA-Z][-.a-zA-Z0-9:_]*(?:\s+|(?=>|/>|%s))'
+                         % _DJ_BALANCED_BLOCK)
+    BARE_ATTR = re.compile(
+        r'(?P<attr>%s|%s|%s)(?:\s+(?!=)|(?=>|/>|%s))'
+        % (HtmlLexer._ATTR_NAME, _DJ_VAR, _DJ_BALANCED_BLOCK,
+           _DJ_BALANCED_BLOCK),
+        re.DOTALL)
+
+    ATTR_AND_VALUE = re.compile(
+        r'(?P<attr>%(attr)s)\s*=\s*'
+        r"(?:'(?P<lita>(?:%(j2v)s|%(j2b)s|[^\'])*)'"    # LITA
+        r'|"(?P<lit>(?:%(j2v)s|%(j2b)s|[^\"])*)"'       # LIT
+        r'|(?P<bare>(?:%(j2v)s|%(j2b)s|[^\'\">\s])+)'   # bare value
+        r')(?:\s+|(?=>|/>|%(j2b)s))'           # end
+        % {'attr': HtmlLexer._ATTR_NAME,
+           'j2v': _DJ_VAR, 'j2b': _DJ_BALANCED_BLOCK},
+        re.DOTALL)
+
+    def parse_entity(self, i):
+        retval = HtmlLexer.parse_entity(self, i)
+        if retval is not None:
+            return retval
+
+        tags = (('{#', '#}', True),
+                ('{%', '%}', True),
+                ('{{', '}}', True),
+
+                ('{{ _(', '}}', True),
+                ('{{ _TODO(', '}}', True),
+                ('{{ i18n_do_not_translate(', '}}', True),
+                ('{{ ngettext(', '}}', True))
+        rawdata = self.rawdata
+        for (starttag, endtag, segment_separates_nltext) in tags:
+            if rawdata.startswith(starttag, i):
+                entity_end = self.parse_to(endtag, i)
+                self._call_callback(rawdata[i:entity_end],
+                                    segment_separates_nltext)
+                return self.updatepos(i, entity_end)
+        return None
+
+
 class HandlebarsTextHandler(NullTextHandler):
     HANDLEBARS_VAR = re.compile(r'{{((?:}[^}]|[^}])*)}}')
     HANDLEBARS_VAR_NO_NATURAL_LANGUAGE = re.compile(r'{{(?:}[^}"]|[^}"])*}}')
@@ -1658,13 +1842,24 @@ def get_parser_for_file(html_file, assume_handlebars=False,
     if html_file == '-' and assume_handlebars:
         parser_class = HandlebarsHtmlLexer
         text_handler = HandlebarsTextHandler
+
     elif html_file.endswith('.handlebars'):
         parser_class = HandlebarsHtmlLexer
         text_handler = HandlebarsTextHandler
+
+    elif html_file.endswith('.html'):
+        print "parse as django"
+        parser_class = DjangoHtmlLexer
+        text_handler = DjangoTextHandler
+        print "DjangoHtmlLexer", parser_class
+        print "DjangoTextHandler", text_handler
+
     else:
+        # todo (arceduardvincent) separate command for the jinja2
         parser_class = Jinja2HtmlLexer
         text_handler = Jinja2TextHandler
     if debug_parser:
+        print "debug_parser"
         text_handler = NullTextHandler   # overrides the above
 
     # We need a second parser to handle nl-text in tag attributes.
