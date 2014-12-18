@@ -762,7 +762,7 @@ class HtmlLexer(markupbase.ParserBase):
         self.clear_cdata_mode()
         return (match.end(), tag)
 
-    def     parse_entity(self, i):
+    def parse_entity(self, i):
         """Parse the 'interesting' entity at self.rawdata[i].
 
         This is called for every place in self.rawdata that matches
@@ -1368,10 +1368,8 @@ class NullTextHandler(object):
             if segment.startswith('<'):
                 segment = self.handle_tag(segment)
             retval += segment
-            print "retval", retval, "/retval"
         else:
             self.nltext_segments.append(segment)
-            print "segment", segment, "segment"
 
         return retval
 
@@ -1613,8 +1611,7 @@ class Jinja2TextHandler(NullTextHandler):
                 retval[i] = retval[i].replace('%', '%%')
 
         arglist = [', %s=%s' % var_and_val for var_and_val in vars.iteritems()]
-        # return '{{ _("%s"%s) }}' % (''.join(retval), ''.join(arglist))
-        return '{%s trans "%s"%s %s}' % ('%', ''.join(retval), ''.join(arglist), '%')
+        return '{{ _("%s"%s) }}' % (''.join(retval), ''.join(arglist))
 
 
 class DjangoTextHandler(NullTextHandler):
@@ -1779,6 +1776,9 @@ class DjangoHtmlLexer(HtmlLexer):
             return retval
 
         tags = (('{#', '#}', True),
+                ('{% comment %}', '{% endcomment %}', True),
+                ('{% blocktrans', '{% endblocktrans %}', True),
+                ('{% if', '{% endif %}', True),
                 ('{%', '%}', True),
                 ('{{', '}}', True),
 
@@ -1848,14 +1848,11 @@ def get_parser_for_file(html_file, assume_handlebars=False,
         text_handler = HandlebarsTextHandler
 
     elif html_file.endswith('.html'):
-        print "parse as django"
         parser_class = DjangoHtmlLexer
         text_handler = DjangoTextHandler
-        print "DjangoHtmlLexer", parser_class
-        print "DjangoTextHandler", text_handler
 
     else:
-        # todo (arceduardvincent) separate command for the jinja2
+        # TODO(arceduardvincent): separate command for the jinja2
         parser_class = Jinja2HtmlLexer
         text_handler = Jinja2TextHandler
     if debug_parser:
