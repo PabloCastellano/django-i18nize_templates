@@ -1778,6 +1778,8 @@ class DjangoHtmlLexer(HtmlLexer):
         tags = (('{#', '#}', True),
                 ('{% comment %}', '{% endcomment %}', True),
                 ('{% blocktrans', '{% endblocktrans %}', True),
+                ('{% block i18n_do_not_translate %}', '{% endblock i18n_do_not_translate %}', True),
+
                 ('{% if', '{% endif %}', True),
                 ('{%', '%}', True),
                 ('{{', '}}', True),
