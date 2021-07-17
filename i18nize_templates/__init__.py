@@ -191,7 +191,7 @@ USAGE: $0 < infile > outfile
 The second usage modifies the files in-place.
 """
 
-import html.parser      # for HTMLParseError
+from.exceptions import HTMLParseError
 import argparse
 import html.entities
 import _markupbase
@@ -636,7 +636,7 @@ class HtmlLexer(_markupbase.ParserBase):
             self.callback_outputs.append(retval)
 
     def error(self, message):
-        raise html.parser.HTMLParseError(message, self.getpos())
+        raise HTMLParseError(message, self.getpos())
 
     def set_cdata_mode(self, tag):
         self.interesting = self.INTERESTING_CDATA(tag)
@@ -1829,7 +1829,7 @@ def i18nize(html_file, parser):
         with open(html_file) as f:
             input = f.read()
 
-    parsed_output = parser.parse(input.decode('utf-8')).encode('utf-8')
+    parsed_output = parser.parse(input)
 
     if html_file == '-':
         sys.stdout.write(parsed_output)
