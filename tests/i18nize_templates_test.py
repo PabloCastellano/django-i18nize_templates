@@ -118,7 +118,7 @@ class HtmlTest(TestBase):
         parser = i18nize_templates.HtmlLexer(None)
         try:
             parser.error("test")
-        except Exception, e:
+        except Exception as e:
             self.assertEqual("test, at line 1, column 1", "%s" % e)
 
 

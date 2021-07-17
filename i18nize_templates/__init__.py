@@ -191,10 +191,10 @@ USAGE: $0 < infile > outfile
 The second usage modifies the files in-place.
 """
 
-import HTMLParser      # for HTMLParseError
+import html.parser      # for HTMLParseError
 import argparse
-import htmlentitydefs
-import markupbase
+import html.entities
+import _markupbase
 import re
 import string
 import sys
@@ -503,8 +503,8 @@ def _case_insensitive_hex(s):
 # since it's not part of html4.  We add in 7-bit ascii as well.
 _NON_ALNUM_ENTITIES = 'apos' + ''.join(
     '|%s|#%s|#[xX]%s' % (name, num, _case_insensitive_hex(hex(num)[2:]))
-    for (name, num) in htmlentitydefs.name2codepoint.iteritems()
-    if not unicodedata.category(unichr(num))[0] in ('L', 'N'))
+    for (name, num) in html.entities.name2codepoint.items()
+    if not unicodedata.category(chr(num))[0] in ('L', 'N'))
 _NON_ALNUM_ENTITIES += ''.join(
     '|#%s|#[xX]%s' % (ord(c), _case_insensitive_hex(hex(ord(c))[2:]))
     for c in (string.punctuation + string.whitespace))
@@ -535,7 +535,7 @@ def natural_language_attributes(tagname, attrval_pairs):
             else:
                 _NL_ATTR_MAP[entry[0]][entry[1]].append(None)   # no prereq
 
-    for i in xrange(len(attrval_pairs) - 1, -1, -1):
+    for i in range(len(attrval_pairs) - 1, -1, -1):
         (attr, val) = attrval_pairs[i]
         # If there's no value, we definitely don't need to munge it...
         if val is None:
@@ -557,7 +557,7 @@ def natural_language_attributes(tagname, attrval_pairs):
                 break
 
 
-class HtmlLexer(markupbase.ParserBase):
+class HtmlLexer(_markupbase.ParserBase):
     """Find tags and other markup and call handler functions.
 
     Usage:
@@ -617,7 +617,7 @@ class HtmlLexer(markupbase.ParserBase):
         % {'attr': _ATTR_NAME}, re.DOTALL)
 
     def __init__(self, callback):
-        markupbase.ParserBase.__init__(self)
+        _markupbase.ParserBase.__init__(self)
         # markupbase makes some callbacks we don't care about.
         for fn in ('handle_comment', 'handle_decl', 'unknown_decl'):
             setattr(self, fn, lambda *args, **kwargs: None)
@@ -636,7 +636,7 @@ class HtmlLexer(markupbase.ParserBase):
             self.callback_outputs.append(retval)
 
     def error(self, message):
-        raise HTMLParser.HTMLParseError(message, self.getpos())
+        raise html.parser.HTMLParseError(message, self.getpos())
 
     def set_cdata_mode(self, tag):
         self.interesting = self.INTERESTING_CDATA(tag)
@@ -817,7 +817,7 @@ class HtmlLexer(markupbase.ParserBase):
            Forwards the return value of the callback as described in
            HtmlLexer.__doc__.
         """
-        markupbase.ParserBase.reset(self)
+        _markupbase.ParserBase.reset(self)
         self.rawdata = rawdata
         self.callback_outputs = []
         self.interesting = self.INTERESTING_NORMAL
@@ -1249,7 +1249,7 @@ class NullTextHandler(object):
         # At the end of this, all pairs will either be entirely inside
         # [first..last], or entirely outside it.  (This depends on the
         # fact tags nest.)
-        for (start_segment, end_segment) in tag_map.iteritems():
+        for (start_segment, end_segment) in tag_map.items():
             if start_segment >= first and start_segment <= last:
                 last = max(last, end_segment)
             if end_segment >= first and end_segment <= last:
@@ -1610,7 +1610,7 @@ class Jinja2TextHandler(NullTextHandler):
             for i in maybe_escape_percents_index:
                 retval[i] = retval[i].replace('%', '%%')
 
-        arglist = [', %s=%s' % var_and_val for var_and_val in vars.iteritems()]
+        arglist = [', %s=%s' % var_and_val for var_and_val in vars.items()]
         return '{{ _("%s"%s) }}' % (''.join(retval), ''.join(arglist))
 
 
@@ -1743,7 +1743,7 @@ class DjangoTextHandler(NullTextHandler):
             for i in maybe_escape_percents_index:
                 retval[i] = retval[i].replace('%', '%%')
 
-        arglist = [', %s=%s' % var_and_val for var_and_val in vars.iteritems()]
+        arglist = [', %s=%s' % var_and_val for var_and_val in vars.items()]
         return '{%s trans "%s"%s %s}' % ('%', ''.join(retval), ''.join(arglist), '%')
 
 
@@ -1858,7 +1858,7 @@ def get_parser_for_file(html_file, assume_handlebars=False,
         parser_class = Jinja2HtmlLexer
         text_handler = Jinja2TextHandler
     if debug_parser:
-        print "debug_parser"
+        print("debug_parser")
         text_handler = NullTextHandler   # overrides the above
 
     # We need a second parser to handle nl-text in tag attributes.
@@ -1887,12 +1887,12 @@ def main(argv=sys.argv):
     num_errors = 0
     for html_file in args.html_files:
         try:
-            print >>sys.stderr, 'i18nizing %s' % html_file
+            print('i18nizing %s' % html_file, file=sys.stderr)
             parser = get_parser_for_file(html_file, args.handlebars,
                                          args.debug_parser)
             i18nize(html_file, parser)
-        except Exception, why:
-            print >>sys.stderr, 'ERROR i18nizing %s: %s' % (html_file, why)
+        except Exception as why:
+            print('ERROR i18nizing %s: %s' % (html_file, why), file=sys.stderr)
             num_errors += 1
             if len(args.html_files) == 1:
                 # For just one file, let it raise the exception if it fails.
